@@ -15,9 +15,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 USERS_FILE = "users.json"
 USED_FILE = "used_jokes.json"
 
-# -------------------------------------
+# ---------------------------------------------------
 # Load / Save JSON
-# -------------------------------------
+# ---------------------------------------------------
 def load_json(path, default):
     if not os.path.exists(path):
         return default
@@ -28,9 +28,9 @@ def save_json(path, data):
     with open(path, "w") as f:
         json.dump(data, f, indent=4)
 
-# -------------------------------------
+# ---------------------------------------------------
 # Fetch NEW Joke from API
-# -------------------------------------
+# ---------------------------------------------------
 async def fetch_joke():
     url = "https://v2.jokeapi.dev/joke/Any?type=single&safe-mode"
     async with aiohttp.ClientSession() as session:
@@ -38,9 +38,9 @@ async def fetch_joke():
             data = await resp.json()
             return "😂 " + data.get("joke", "Joke not found 😅")
 
-# -------------------------------------
-# Guarantee Unique Joke per User
-# -------------------------------------
+# ---------------------------------------------------
+# Guarantee a Unique Joke per User
+# ---------------------------------------------------
 async def get_unique_joke(user_id):
     used = load_json(USED_FILE, {})
 
@@ -57,7 +57,7 @@ async def get_unique_joke(user_id):
             return joke
         attempts += 1
 
-    # Reset if API repeats too much
+    # If API repeats too often → reset history
     used[str(user_id)] = []
     save_json(USED_FILE, used)
 
@@ -66,9 +66,9 @@ async def get_unique_joke(user_id):
     save_json(USED_FILE, used)
     return joke
 
-# -------------------------------------
-# Buttons
-# -------------------------------------
+# ---------------------------------------------------
+# Buttons under each joke
+# ---------------------------------------------------
 def joke_buttons():
     return InlineKeyboardMarkup([
         [
@@ -77,9 +77,9 @@ def joke_buttons():
         ]
     ])
 
-# -------------------------------------
+# ---------------------------------------------------
 # /start command
-# -------------------------------------
+# ---------------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     users = load_json(USERS_FILE, {"users": []})
@@ -89,26 +89,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_json(USERS_FILE, users)
 
     joke = await get_unique_joke(user_id)
+
     await update.message.reply_text(
-        f"🔥 Welcome! Here's a fresh joke:\n\n{joke}",
+        f"🔥 Welcome! Here's a fresh joke for you:\n\n{joke}",
         reply_markup=joke_buttons()
     )
 
-# -------------------------------------
+# ---------------------------------------------------
 # Handle Button (Another Joke)
-# -------------------------------------
+# ---------------------------------------------------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
-
     await query.answer()
 
     joke = await get_unique_joke(user_id)
+
     await query.edit_message_text(joke, reply_markup=joke_buttons())
 
-# -------------------------------------
+# ---------------------------------------------------
 # Daily Automatic Joke
-# -------------------------------------
+# ---------------------------------------------------
 async def send_daily_jokes(app):
     users = load_json(USERS_FILE, {"users": []})
 
@@ -123,9 +124,9 @@ async def send_daily_jokes(app):
         except Exception as e:
             print(f"Failed to send to {user_id}: {e}")
 
-# -------------------------------------
+# ---------------------------------------------------
 # Main Runner
-# -------------------------------------
+# ---------------------------------------------------
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -139,6 +140,16 @@ async def main():
     print("🤖 Bot is running...")
     await app.run_polling()
 
+# ---------------------------------------------------
+# FIXED EVENT LOOP FOR RAILWAY
+# ---------------------------------------------------
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+
+    try:
+        asyncio.run(main())
+    except RuntimeError:
+        # Railway / Replit / Codespaces event-loop fix
+        loop = asyncio.get_event_loop()
+        loop.create_task(main())
+        loop.run_forever()
