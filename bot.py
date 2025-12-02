@@ -7,16 +7,16 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ContextTypes
 )
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+PORT = int(os.environ.get("PORT", 8080))  # Railway port
 
 USERS_FILE = "users.json"
 USED_FILE = "used_jokes.json"
 
 # ---------------------------------------------------
-# JSON Load / Save
+# JSON utils
 # ---------------------------------------------------
 def load_json(path, default):
     if not os.path.exists(path):
@@ -39,7 +39,7 @@ async def fetch_joke():
             return "😂 " + data.get("joke", "Joke not found 😅")
 
 # ---------------------------------------------------
-# Unique Joke for User
+# Unique Joke
 # ---------------------------------------------------
 async def get_unique_joke(user_id):
     used = load_json(USED_FILE, {})
@@ -47,16 +47,15 @@ async def get_unique_joke(user_id):
     if str(user_id) not in used:
         used[str(user_id)] = []
 
-    attempts = 0
-    while attempts < 20:
+    # Try 20 times for unique joke
+    for _ in range(20):
         joke = await fetch_joke()
         if joke not in used[str(user_id)]:
             used[str(user_id)].append(joke)
             save_json(USED_FILE, used)
             return joke
-        attempts += 1
 
-    # Reset if too many repeats
+    # Reset if many repeats
     used[str(user_id)] = []
     save_json(USED_FILE, used)
 
@@ -81,8 +80,8 @@ def joke_buttons():
 # ---------------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
     users = load_json(USERS_FILE, {"users": []})
+
     if user_id not in users["users"]:
         users["users"].append(user_id)
         save_json(USERS_FILE, users)
@@ -94,7 +93,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------
-# Buttons Handler
+# Button Handler
 # ---------------------------------------------------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -105,36 +104,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(joke, reply_markup=joke_buttons())
 
 # ---------------------------------------------------
-# Daily Joke
+# MAIN (WEBHOOK — NO POLLING)
 # ---------------------------------------------------
-async def send_daily_jokes(app):
-    users = load_json(USERS_FILE, {"users": []})
-    for user_id in users["users"]:
-        try:
-            joke = await get_unique_joke(user_id)
-            await app.bot.send_message(
-                chat_id=user_id,
-                text=f"🌞 Good Morning! Here’s your daily joke:\n\n{joke}",
-                reply_markup=joke_buttons()
-            )
-        except Exception as e:
-            print(f"Error sending to {user_id}: {e}")
-
-# ---------------------------------------------------
-# MAIN (Railway Safe)
-# ---------------------------------------------------
-def main():
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
-    scheduler.add_job(send_daily_jokes, "cron", hour=9, minute=0, args=[app])
-    scheduler.start()
+    # Webhook URL
+    webhook_url = f"https://{os.environ['RAILWAY_PUBLIC_DOMAIN']}/webhook"
 
-    print("🤖 Bot is running…")
-    app.run_polling()   # <-- NO ASYNCIO.RUN(), 100% SAFE
+    await app.bot.set_webhook(webhook_url)
+    print(f"🚀 Webhook set: {webhook_url}")
+
+    # Start webhook server
+    await app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=webhook_url
+    )
+
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
